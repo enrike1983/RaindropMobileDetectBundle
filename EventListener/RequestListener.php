@@ -45,6 +45,12 @@ class RequestListener implements EventSubscriberInterface
     * @var string
     */
     protected $newDevice;
+    
+    /**
+     *
+     * @var string
+     */
+    protected $entityManager;
 
     /**
      * Constructor.
@@ -54,12 +60,13 @@ class RequestListener implements EventSubscriberInterface
      * @param ActiveTheme              $activeTheme
      * @param DeviceDetectionInterface $deviceDetection
      */
-    public function __construct(ActiveDevice $activeDevice, array $redirectConf, ActiveTheme $activeTheme, DeviceDetectionInterface $deviceDetection)
+    public function __construct($entityManager, ActiveDevice $activeDevice, array $redirectConf, ActiveTheme $activeTheme, DeviceDetectionInterface $deviceDetection)
     {
         $this->activeDevice = $activeDevice;
         $this->redirectConf = $redirectConf;
         $this->activeTheme = $activeTheme;
         $this->deviceDetection = $deviceDetection;
+        $this->entityManager = $entityManager;
     }
 
    /**
@@ -68,7 +75,7 @@ class RequestListener implements EventSubscriberInterface
     public function onKernelRequest(GetResponseEvent $event)
     {
         $request = $event->getRequest();
-
+        
         if (HttpKernelInterface::MASTER_REQUEST === $event->getRequestType()) {
             $cookieValue = null;
 
@@ -79,7 +86,6 @@ class RequestListener implements EventSubscriberInterface
             if ($cookieValue && $cookieValue !== $this->activeDevice->getName()) {
                 $this->activeDevice->setName($cookieValue);
             }
-
             // force liipTheme based on configured host
             if ($this->redirectConf['mobile']['force_device']) {
                 if ($this->getCurrentHost($request) === $this->redirectConf['mobile']['host']) {
@@ -89,7 +95,8 @@ class RequestListener implements EventSubscriberInterface
                 }
             }
         }
-
+        
+        
         // Redirects to the mobile version
         if ($this->hasMobileRedirect($request)) {
             if (($response = $this->getMobileRedirectResponse($request))) {
@@ -98,6 +105,7 @@ class RequestListener implements EventSubscriberInterface
 
             return;
         }
+        
     }
 
    /**
@@ -111,7 +119,7 @@ class RequestListener implements EventSubscriberInterface
         if (!$this->redirectConf['mobile']['is_enabled']) {
             return false;
         }
-
+        
         $isMobile = $this->deviceDetection->isMobile() && !$this->deviceDetection->isTablet();
         $isMobileHost = ($this->getCurrentHost($request) === $this->redirectConf['mobile']['host']);
 
@@ -144,7 +152,13 @@ class RequestListener implements EventSubscriberInterface
     */
     private function getRedirectUrl($platform, $request)
     {
-        return $request->getScheme() . '://' . $this->redirectConf[$platform]['host'] . $request->getRequestUri();
+        //checks if exists a mobile view for the current page
+        if($this->pageHasMobileView($request)) {
+            return $request->getScheme() . '://' . $this->redirectConf[$platform]['host'].$request->getRequestUri();
+        } else {
+            return $request->getScheme() . '://' . $this->redirectConf[$platform]['host'];
+        }
+        
     }
 
    /**
@@ -163,5 +177,74 @@ class RequestListener implements EventSubscriberInterface
         return array(
             KernelEvents::REQUEST => array('onKernelRequest', 0),
         );
+    }
+    
+    /**
+     * Gets the current page from the request parameter after the match, if set, false otherwise
+     * 
+     * @param type $request
+     * @return boolean
+     */
+    protected function getCurrentPage($request)
+    {
+        $route_content = $request->get('contentDocument');
+        $page = $this->getContent($route_content);
+        
+        if($page) {
+            return $page;
+        }
+        
+        return false;
+    }
+    
+    protected function getContent($route_content)
+    {
+        $content = null;
+
+        if (!empty($route_content)) {
+            list($model, $field, $value) = explode(':', $route_content);
+            
+            $content = $this->entityManager->getRepository($model)
+                    ->findEager($value);
+        }
+
+        return $content;
+    }
+    
+    /**
+     * Check if current page ( resolved by route ) has a mobile layout or a mobile block inside.
+     * @param type $request
+     */
+    protected function pageHasMobileView($request)
+    {
+        $page = $this->getCurrentPage($request);
+
+        if($page) {
+           
+            //checks phone template. If exists return true
+            $template = $this->entityManager->getRepository('RaindropRoutingBundle:Route')
+                    ->findOneByName($page->getLayout().'|phone');
+             
+            if($template) {
+                return true;
+            }
+
+            
+            $blocks = $this->getCurrentPage($request)->getBlocks();
+
+            //if at least 1 block inside the template is phone, is ok
+            foreach($blocks as $block) {
+                
+                $vars = explode('|', $block->getTemplate());
+
+                //if exists the phone theme means that mobile exists
+                if(isset($vars[1])) {
+                    return true;
+                }
+            }
+        }
+        
+        //no mobile views
+        return false;
     }
 }
