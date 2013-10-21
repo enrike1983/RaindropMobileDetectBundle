@@ -94,18 +94,17 @@ class RequestListener implements EventSubscriberInterface
                     $this->activeTheme->setName($this->redirectConf['mobile']['desktop_theme']);
                 }
             }
+            
         }
         
-        
         // Redirects to the mobile version
-        if ($this->hasMobileRedirect($request)) {
+        if ($this->hasMobileRedirect($request, $event)) {
             if (($response = $this->getMobileRedirectResponse($request))) {
                 $event->setResponse($response);
             }
 
             return;
         }
-        
     }
 
    /**
@@ -114,7 +113,7 @@ class RequestListener implements EventSubscriberInterface
     * @param Request $request
     * @return boolean
     */
-    private function hasMobileRedirect($request)
+    private function hasMobileRedirect($request, $event)
     {
         if (!$this->redirectConf['mobile']['is_enabled']) {
             return false;
@@ -123,10 +122,15 @@ class RequestListener implements EventSubscriberInterface
         $isMobile = $this->deviceDetection->isMobile() && !$this->deviceDetection->isTablet();
         $isMobileHost = ($this->getCurrentHost($request) === $this->redirectConf['mobile']['host']);
 
-        if ($isMobile && !$isMobileHost) {
+        if ($isMobile && !$isMobileHost){
             return true;
         }
-
+        
+        if(!$this->pageHasMobileView($request) && $isMobileHost) {
+            //$event->setResponse(new RedirectResponse($request->getScheme() . '://' . $this->redirectConf[self::MOBILE]['host'])); 
+            return true;
+        }
+        
         return false;
     }
 
